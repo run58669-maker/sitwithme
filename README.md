@@ -101,3 +101,7 @@ Codex thread: 01a175f8-0883-7641-b5d9-6e3974e7582a
 ## License
 
 [MIT](LICENSE) © sitwithme contributors
+
+## Demo video
+
+https://youtu.be/EE4D3sKncFs (2:27)
