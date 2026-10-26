@@ -6,23 +6,33 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocket, WebSocketServer } from "ws";
 import { IdleStateMachine } from "./idle.js";
-import { parseResidentNames, ResidentManager } from "./residents.js";
+import { ResidentManager } from "./residents.js";
 import { parseCommand, Room } from "./room.js";
+import {
+  loadSettings,
+  parseSettings,
+  saveSettings,
+  settingsFromEnvironment,
+  type AppSettings,
+} from "./settings.js";
 import { TwitchAuth, TwitchEventSub, type TwitchChatMessage, type TwitchConfig } from "./twitch.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-const chairCount = Number.parseInt(process.env.CHAIRS ?? "6", 10);
-const idleMinutes = Number(process.env.IDLE_MINUTES ?? "3");
+const host = process.env.HOST?.trim() || "127.0.0.1";
 const fakeChat = process.env.FAKE_CHAT === "1";
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const settingsFile = path.resolve(process.env.SETTINGS_FILE ?? path.join(projectRoot, "settings.json"));
 const redirectUri = `http://localhost:${port}/callback`;
-const room = new Room(chairCount);
-const idle = new IdleStateMachine(idleMinutes * 60_000);
-const residents = new ResidentManager(parseResidentNames(process.env.RESIDENTS), chairCount);
+let settings = await loadSettings(settingsFile, settingsFromEnvironment());
+const room = new Room(settings.chairCount);
+const idle = new IdleStateMachine(settings.idleMinutes * 60_000);
+let residents = new ResidentManager(settings.residentNames, settings.chairCount);
 const app = express();
 const server = createServer(app);
 const overlaySockets = new WebSocketServer({ noServer: true });
 const oauthStates = new Set<string>();
+
+app.use(express.json({ limit: "16kb" }));
 
 const twitchConfig: TwitchConfig = {
   clientId: process.env.TWITCH_CLIENT_ID ?? "",
@@ -30,7 +40,7 @@ const twitchConfig: TwitchConfig = {
   channel: process.env.TWITCH_CHANNEL ?? "",
   botUser: process.env.TWITCH_BOT_USER || undefined,
   redirectUri,
-  tokenFile: path.join(projectRoot, ".tokens.json"),
+  tokenFile: path.resolve(process.env.TOKEN_FILE ?? path.join(projectRoot, ".tokens.json")),
 };
 
 const twitchAuth = new TwitchAuth(twitchConfig);
@@ -55,6 +65,8 @@ function stateSnapshot(now = Date.now()) {
     nextIdleAt: idleState.nextIdleAt,
     serverTime: now,
     residents: residents.snapshot(),
+    palette: settings.palette,
+    settings,
   };
 }
 
@@ -80,6 +92,29 @@ function handleChat(message: TwitchChatMessage): void {
   }
 
   residents.update(now, room.snapshot(now));
+  broadcastState(now);
+}
+
+function sameResidentNames(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((name, index) => name === right[index]);
+}
+
+function applySettings(nextSettings: AppSettings, now = Date.now()): void {
+  const residentsChanged =
+    settings.chairCount !== nextSettings.chairCount ||
+    !sameResidentNames(settings.residentNames, nextSettings.residentNames);
+
+  room.resize(nextSettings.chairCount);
+  const idleTransition = idle.setThresholdMs(nextSettings.idleMinutes * 60_000, now);
+  settings = nextSettings;
+
+  if (residentsChanged) {
+    residents = new ResidentManager(settings.residentNames, settings.chairCount);
+    if (idle.snapshot().idle) residents.enterIdle(now);
+  } else if (idleTransition === "enter") {
+    residents.enterIdle(now);
+  }
+
   broadcastState(now);
 }
 
@@ -134,8 +169,49 @@ app.get("/api/state", (_request, response) => {
   response.set("Cache-Control", "no-store").json({
     room: { chairs, seats },
     ...activity,
-    idleMinutes,
+    idleMinutes: settings.idleMinutes,
   });
+});
+
+app.get("/api/settings", (_request, response) => {
+  response.set("Cache-Control", "no-store").json(settings);
+});
+
+app.post("/api/settings", async (request, response) => {
+  try {
+    const nextSettings = parseSettings(request.body);
+    await saveSettings(settingsFile, nextSettings);
+    applySettings(nextSettings);
+    response.json({ ok: true, settings });
+  } catch (error) {
+    response.status(400).json({ ok: false, error: (error as Error).message });
+  }
+});
+
+app.post("/api/test/idle", (_request, response) => {
+  const now = Date.now();
+  if (idle.forceIdle(now) === "enter") residents.enterIdle(now);
+  broadcastState(now);
+  response.json({ ok: true, state: stateSnapshot(now) });
+});
+
+app.post("/api/test/sit", (request, response) => {
+  const displayName = typeof request.body?.name === "string" ? request.body.name.trim() : "";
+  if (!displayName || Array.from(displayName).length > 25) {
+    response.status(400).json({ ok: false, error: "Viewer name must be 1 to 25 characters." });
+    return;
+  }
+  const userId = `panel-${displayName.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  handleChat({ userId, displayName, text: "!sit" });
+  response.json({ ok: true, state: stateSnapshot() });
+});
+
+app.get("/panel", (_request, response) => {
+  response.sendFile(path.join(projectRoot, "public", "panel.html"));
+});
+
+app.get("/overlay", (_request, response) => {
+  response.sendFile(path.join(projectRoot, "public", "overlay.html"));
 });
 
 app.use(express.static(path.join(projectRoot, "public")));
@@ -176,15 +252,17 @@ const activityTimer = setInterval(() => {
   const now = Date.now();
   const transition = idle.update(now);
   if (transition === "enter") {
-    console.log(`[idle] No human chat for ${idleMinutes} minute(s); residents are active.`);
+    console.log(`[idle] No human chat for ${settings.idleMinutes} minute(s); residents are active.`);
     residents.enterIdle(now);
   }
   const changed = residents.update(now, room.snapshot(now));
   if (transition || changed) broadcastState(now);
 }, 100);
 
-server.listen(port, () => {
-  console.log(`[server] Overlay: http://localhost:${port}/overlay.html`);
+server.listen(port, host, () => {
+  console.log(`[server] Listening on http://${host}:${port}`);
+  console.log(`[server] Panel: http://localhost:${port}/panel`);
+  console.log(`[server] Overlay: http://localhost:${port}/overlay`);
   console.log(`[server] Overlay WebSocket: ws://localhost:${port}/ws`);
   if (fakeChat) {
     console.log("[fake-chat] Enabled; Twitch is not contacted.");

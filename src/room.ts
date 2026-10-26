@@ -51,13 +51,32 @@ export function formatChatBubble(message: string, maximumLength = 40): string {
 }
 
 export class Room {
-  private readonly seats: Array<SeatedViewer | null>;
+  private seats: Array<SeatedViewer | null>;
 
-  constructor(readonly chairCount = 6) {
+  constructor(chairCount = 6) {
+    this.validateChairCount(chairCount);
+    this.seats = Array.from({ length: chairCount }, () => null);
+  }
+
+  get chairCount(): number {
+    return this.seats.length;
+  }
+
+  resize(chairCount: number): void {
+    this.validateChairCount(chairCount);
+    if (chairCount === this.chairCount) return;
+
+    const viewers = this.seats.filter((viewer): viewer is SeatedViewer => viewer !== null);
+    this.seats = Array.from({ length: chairCount }, (_value, chairIndex) => {
+      const viewer = viewers[chairIndex];
+      return viewer ? { ...viewer, chairIndex } : null;
+    });
+  }
+
+  private validateChairCount(chairCount: number): void {
     if (!Number.isInteger(chairCount) || chairCount < 1 || chairCount > 24) {
       throw new Error("CHAIRS must be an integer between 1 and 24.");
     }
-    this.seats = Array.from({ length: chairCount }, () => null);
   }
 
   snapshot(now = Date.now()): RoomSnapshot {

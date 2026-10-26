@@ -22,33 +22,53 @@
         const context = canvas.getContext("2d");
         const WIDTH = 960;
         const HEIGHT = 540;
-        const palette = {
-          outline: "#291a35",
-          outlineSoft: "#4a2944",
-          wall: "#bd765f",
-          wallLight: "#e5ad79",
-          wood: "#9f553a",
-          woodLight: "#d98247",
-          woodDark: "#603142",
-          honey: "#f2ad59",
-          cream: "#fff1c9",
-          plum: "#5c3462",
-          dusk: "#4a3a73",
-          duskLight: "#b55d78",
-          teal: "#3f7c72",
-          leaf: "#456348",
-          rug: "#b95563",
-          rugLight: "#e88972",
-          residentOne: "#728b7d",
-          residentTwo: "#88728b",
-          residentThree: "#9a806a",
-          smoke: "#766171",
+        const scaleValue = Number(new URLSearchParams(location.search).get("scale") || "1");
+        const overlayScale = Number.isFinite(scaleValue) ? Math.min(3, Math.max(0.5, scaleValue)) : 1;
+        const PALETTES = {
+          "cozy-orange": {
+            outline: "#291a35", outlineSoft: "#4a2944", wall: "#bd765f", wallLight: "#e5ad79",
+            wood: "#9f553a", woodLight: "#d98247", woodDark: "#603142", honey: "#f2ad59",
+            cream: "#fff1c9", plum: "#5c3462", dusk: "#4a3a73", duskLight: "#b55d78",
+            teal: "#3f7c72", leaf: "#456348", rug: "#b95563", rugLight: "#e88972",
+            residentOne: "#728b7d", residentTwo: "#88728b", residentThree: "#9a806a",
+            smoke: "#766171", fire: "#e66b3e", firebox: "#3d2537", skin: "#f1b58d",
+            residentSkin: "#d8a487", residentLabel: "#ddd3bd", cat: "#6d5960",
+          },
+          "night-blue": {
+            outline: "#11182e", outlineSoft: "#293d66", wall: "#4e6694", wallLight: "#829ac7",
+            wood: "#344c73", woodLight: "#5978a7", woodDark: "#17233f", honey: "#d6b66d",
+            cream: "#eef3ff", plum: "#394b78", dusk: "#1d2c54", duskLight: "#59658f",
+            teal: "#4f8395", leaf: "#4d6d72", rug: "#53658e", rugLight: "#91a7cc",
+            residentOne: "#6c8292", residentTwo: "#7a7793", residentThree: "#829093",
+            smoke: "#63708a", fire: "#df7655", firebox: "#151d35", skin: "#e2ae92",
+            residentSkin: "#c79c8a", residentLabel: "#d9e1ef", cat: "#596477",
+          },
+          forest: {
+            outline: "#1f2a27", outlineSoft: "#35483c", wall: "#647a52", wallLight: "#9caf79",
+            wood: "#765940", woodLight: "#a17b50", woodDark: "#3a3b2f", honey: "#c4b77c",
+            cream: "#f2efd0", plum: "#5b5342", dusk: "#40533b", duskLight: "#71805a",
+            teal: "#47736b", leaf: "#3f6043", rug: "#6f8157", rugLight: "#a4a968",
+            residentOne: "#71826c", residentTwo: "#817a69", residentThree: "#6c807a",
+            smoke: "#657067", fire: "#cf7047", firebox: "#26382e", skin: "#e1b18c",
+            residentSkin: "#cda184", residentLabel: "#dce0c5", cat: "#5e685e",
+          },
+          candy: {
+            outline: "#3b2744", outlineSoft: "#684466", wall: "#c47aa5", wallLight: "#f2b5d4",
+            wood: "#9a617f", woodLight: "#d391ae", woodDark: "#563858", honey: "#ffe0a8",
+            cream: "#fff4f4", plum: "#815080", dusk: "#6a548b", duskLight: "#b881bd",
+            teal: "#69a1a0", leaf: "#708b75", rug: "#ca8ac1", rugLight: "#f0aac5",
+            residentOne: "#8c8198", residentTwo: "#9a7f91", residentThree: "#829398",
+            smoke: "#826f84", fire: "#f06c76", firebox: "#4a304b", skin: "#f0b59c",
+            residentSkin: "#d9a28f", residentLabel: "#f3dce4", cat: "#766678",
+          },
         };
+        let palette = PALETTES["cozy-orange"];
         let roomState = {
           chairs: 6,
           seats: Array(6).fill(null),
           idle: false,
           residents: [],
+          palette: "cozy-orange",
         };
         let reconnectAttempt = 0;
         let lastWavingCount = -1;
@@ -119,14 +139,14 @@
           rect(690, 221, 83, 75, palette.outline);
           rect(699, 229, 65, 67, palette.woodDark);
           rect(707, 248, 49, 48, palette.outlineSoft);
-          rect(713, 257, 37, 39, "#3d2537");
+          rect(713, 257, 37, 39, palette.firebox);
           rect(684, 213, 95, 12, palette.outline);
           rect(691, 216, 81, 7, palette.wood);
           const flicker = Math.floor(now / (roomState.idle ? 120 : 220)) % 3;
-          rect(725, 276 - flicker * 2, 13, 19 + flicker * 2, "#e66b3e");
+          rect(725, 276 - flicker * 2, 13, 19 + flicker * 2, palette.fire);
           rect(730, 269 + flicker, 9, 24 - flicker, palette.honey);
           rect(735, 280 - flicker * 3, 8, 15 + flicker * 2, palette.cream);
-          if (roomState.idle && flicker === 1) rect(747, 269, 5, 8, "#e66b3e");
+          if (roomState.idle && flicker === 1) rect(747, 269, 5, 8, palette.fire);
         }
 
         function drawCat(now) {
@@ -134,7 +154,7 @@
           const stretching = roomState.idle && cycle < 2500;
           const x = 157;
           const y = 307;
-          const fur = "#6d5960";
+          const fur = palette.cat;
           if (stretching) {
             rect(x, y + 8, 43, 11, palette.outline);
             rect(x + 4, y + 9, 34, 8, fur);
@@ -272,7 +292,7 @@
           const originX = Math.round(x - 8 * scale);
           const originY = Math.round(y - 42);
           const color = hashColor(viewer.displayName);
-          const skin = "#f1b58d";
+          const skin = palette.skin;
           const hair = palette.outlineSoft;
           const waving = Number(viewer.waveUntil || 0) > now;
           const wavePhase = Math.floor(now / 140) % 2;
@@ -325,7 +345,7 @@
           const originY = Math.round(y - 42 - walkingBob);
           const colors = [palette.residentOne, palette.residentTwo, palette.residentThree];
           const color = colors[resident.paletteIndex % colors.length];
-          const skin = "#d8a487";
+          const skin = palette.residentSkin;
           const hair = palette.smoke;
           const stretching = resident.action === "stretching";
 
@@ -335,7 +355,7 @@
           context.lineWidth = 5;
           context.strokeStyle = palette.outline;
           context.strokeText(resident.name, x, originY - 7);
-          context.fillStyle = "#ddd3bd";
+          context.fillStyle = palette.residentLabel;
           context.fillText(resident.name, x, originY - 7);
 
           const pixel = (px, py, width, height, fill) => {
@@ -375,7 +395,7 @@
             canvas.dataset.wavingCount = String(wavingCount);
             lastWavingCount = wavingCount;
           }
-          const ratio = Math.min(canvas.width / WIDTH, canvas.height / HEIGHT);
+          const ratio = Math.min(canvas.width / WIDTH, canvas.height / HEIGHT) * overlayScale;
           const offsetX = (canvas.width - WIDTH * ratio) / 2;
           const offsetY = (canvas.height - HEIGHT * ratio) / 2;
           context.setTransform(1, 0, 0, 1, 0, 0);
@@ -410,7 +430,10 @@
                 seats: message.seats,
                 idle: Boolean(message.idle),
                 residents: message.residents,
+                palette: PALETTES[message.palette] ? message.palette : "cozy-orange",
               };
+              palette = PALETTES[roomState.palette];
+              canvas.dataset.palette = roomState.palette;
               updateAccessibility();
             }
             if (message.type === "event" && message.event === "wave") {
@@ -427,6 +450,7 @@
 
         window.addEventListener("resize", resize);
         resize();
+        canvas.dataset.scale = String(overlayScale);
         updateAccessibility();
         connect();
         requestAnimationFrame(render);

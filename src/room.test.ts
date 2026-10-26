@@ -48,3 +48,20 @@ test("formats chat by Unicode characters before escaping", () => {
   assert.equal(Array.from(formatted).length, 40);
   assert.ok(formatted.endsWith("…"));
 });
+
+test("resizes chairs while preserving viewers in seat order", () => {
+  const room = new Room(3);
+  room.apply({ id: "1", displayName: "first" }, "sit");
+  room.apply({ id: "2", displayName: "second" }, "sit");
+
+  room.resize(2);
+  assert.equal(room.snapshot().chairs, 2);
+  assert.deepEqual(
+    room.snapshot().seats.map((viewer) => viewer?.displayName),
+    ["first", "second"],
+  );
+
+  room.resize(4);
+  assert.equal(room.snapshot().chairs, 4);
+  assert.equal(room.snapshot().seats[2], null);
+});

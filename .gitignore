@@ -2,6 +2,7 @@ node_modules
 .npm-cache
 .env
 .tokens.json
+settings.json
 dist
 *.log
 secrets/

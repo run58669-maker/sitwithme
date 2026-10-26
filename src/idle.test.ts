@@ -34,3 +34,12 @@ test("fractional-minute thresholds can be represented exactly", () => {
   assert.equal(idle.update(24_999), null);
   assert.equal(idle.update(25_000), "enter");
 });
+
+test("can be forced idle and can apply a shorter threshold", () => {
+  const forced = new IdleStateMachine(60_000, 0);
+  assert.equal(forced.forceIdle(2_000), "enter");
+  assert.equal(forced.snapshot().idleSince, 2_000);
+
+  const reconfigured = new IdleStateMachine(60_000, 0);
+  assert.equal(reconfigured.setThresholdMs(5_000, 5_000), "enter");
+});

@@ -13,13 +13,24 @@ export class IdleStateMachine {
   private lastHumanAt: number;
 
   constructor(
-    readonly thresholdMs: number,
+    private thresholdMs: number,
     startedAt = Date.now(),
   ) {
-    if (!Number.isFinite(thresholdMs) || thresholdMs <= 0) {
-      throw new Error("Idle threshold must be a positive number of milliseconds.");
-    }
+    this.validateThreshold(thresholdMs);
     this.lastHumanAt = startedAt;
+  }
+
+  setThresholdMs(thresholdMs: number, now = Date.now()): IdleTransition | null {
+    this.validateThreshold(thresholdMs);
+    this.thresholdMs = thresholdMs;
+    return this.update(now);
+  }
+
+  forceIdle(now = Date.now()): IdleTransition | null {
+    if (this.isIdle) return null;
+    this.isIdle = true;
+    this.idleStartedAt = now;
+    return "enter";
   }
 
   update(now = Date.now()): IdleTransition | null {
@@ -46,5 +57,11 @@ export class IdleStateMachine {
       lastHumanMessageAt: this.lastHumanAt,
       nextIdleAt: this.lastHumanAt + this.thresholdMs,
     };
+  }
+
+  private validateThreshold(thresholdMs: number): void {
+    if (!Number.isFinite(thresholdMs) || thresholdMs <= 0) {
+      throw new Error("Idle threshold must be a positive number of milliseconds.");
+    }
   }
 }

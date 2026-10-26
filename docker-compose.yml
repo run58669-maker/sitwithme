@@ -1,0 +1,24 @@
+services:
+  sitwithme:
+    build: .
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    environment:
+      HOST: 0.0.0.0
+      PORT: ${PORT:-3000}
+      SETTINGS_FILE: /data/settings.json
+      TOKEN_FILE: /data/.tokens.json
+      TWITCH_CLIENT_ID: ${TWITCH_CLIENT_ID:-}
+      TWITCH_CLIENT_SECRET: ${TWITCH_CLIENT_SECRET:-}
+      TWITCH_CHANNEL: ${TWITCH_CHANNEL:-}
+      TWITCH_BOT_USER: ${TWITCH_BOT_USER:-}
+      CHAIRS: ${CHAIRS:-6}
+      IDLE_MINUTES: ${IDLE_MINUTES:-3}
+      RESIDENTS: ${RESIDENTS:-Mori,Pip,Tabby}
+      ROOM_PALETTE: ${ROOM_PALETTE:-cozy-orange}
+      FAKE_CHAT: ${FAKE_CHAT:-0}
+    volumes:
+      - sitwithme-data:/data
+
+volumes:
+  sitwithme-data:
