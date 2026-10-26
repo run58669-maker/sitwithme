@@ -5,15 +5,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { WebSocket, WebSocketServer } from "ws";
-import { parseCommand, Room, type RoomEvent } from "./room.js";
+import { IdleStateMachine } from "./idle.js";
+import { parseResidentNames, ResidentManager } from "./residents.js";
+import { parseCommand, Room } from "./room.js";
 import { TwitchAuth, TwitchEventSub, type TwitchChatMessage, type TwitchConfig } from "./twitch.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const chairCount = Number.parseInt(process.env.CHAIRS ?? "6", 10);
+const idleMinutes = Number(process.env.IDLE_MINUTES ?? "3");
 const fakeChat = process.env.FAKE_CHAT === "1";
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const redirectUri = `http://localhost:${port}/callback`;
 const room = new Room(chairCount);
+const idle = new IdleStateMachine(idleMinutes * 60_000);
+const residents = new ResidentManager(parseResidentNames(process.env.RESIDENTS), chairCount);
 const app = express();
 const server = createServer(app);
 const overlaySockets = new WebSocketServer({ noServer: true });
@@ -40,15 +45,42 @@ function broadcast(payload: unknown): void {
   for (const client of overlaySockets.clients) send(client, payload);
 }
 
+function stateSnapshot(now = Date.now()) {
+  const idleState = idle.snapshot();
+  return {
+    ...room.snapshot(now),
+    idle: idleState.idle,
+    idleSince: idleState.idleSince,
+    lastHumanMessageAt: idleState.lastHumanMessageAt,
+    nextIdleAt: idleState.nextIdleAt,
+    serverTime: now,
+    residents: residents.snapshot(),
+  };
+}
+
+function broadcastState(now = Date.now()): void {
+  broadcast(stateSnapshot(now));
+}
+
 function handleChat(message: TwitchChatMessage): void {
+  const now = Date.now();
   console.log(`[chat] ${message.displayName}: ${message.text}`);
+  if (idle.recordHumanMessage(now) === "exit") {
+    console.log("[idle] Human chat resumed; residents are stepping back.");
+    residents.exitIdle(now);
+  }
+
   const command = parseCommand(message.text);
-  if (!command) return;
-  const user = { id: message.userId, displayName: message.displayName };
-  const event = room.apply(user, command);
-  if (!event) return;
-  broadcast(event);
-  broadcast(room.snapshot());
+  if (command) {
+    const user = { id: message.userId, displayName: message.displayName };
+    const event = room.apply(user, command, now);
+    if (event) broadcast(event);
+  } else {
+    room.showChatBubble(message.userId, message.text, now);
+  }
+
+  residents.update(now, room.snapshot(now));
+  broadcastState(now);
 }
 
 function twitchConfigured(): boolean {
@@ -95,6 +127,17 @@ app.get("/callback", async (request, response) => {
   }
 });
 
+app.get("/api/state", (_request, response) => {
+  const now = Date.now();
+  const snapshot = stateSnapshot(now);
+  const { type: _type, chairs, seats, ...activity } = snapshot;
+  response.set("Cache-Control", "no-store").json({
+    room: { chairs, seats },
+    ...activity,
+    idleMinutes,
+  });
+});
+
 app.use(express.static(path.join(projectRoot, "public")));
 
 server.on("upgrade", (request, socket, head) => {
@@ -109,24 +152,36 @@ server.on("upgrade", (request, socket, head) => {
   });
 });
 
-overlaySockets.on("connection", (socket) => send(socket, room.snapshot()));
+overlaySockets.on("connection", (socket) => send(socket, stateSnapshot()));
 
 function startFakeChat(): void {
-  const messages: Array<{ delay: number; userId: string; displayName: string; text: string }> = [
-    { delay: 300, userId: "fake-1", displayName: "mossbyte", text: "!sit" },
-    { delay: 900, userId: "fake-2", displayName: "lumen", text: "!sit" },
-    { delay: 1_500, userId: "fake-1", displayName: "mossbyte", text: "!wave" },
-    { delay: 2_100, userId: "fake-3", displayName: "orbitcat", text: "!sit" },
-    { delay: 3_000, userId: "fake-2", displayName: "lumen", text: "!leave" },
-    { delay: 3_600, userId: "fake-2", displayName: "lumen", text: "!sit" },
-  ];
-  for (const message of messages) {
-    setTimeout(() => handleChat(message), message.delay);
-  }
-  setInterval(() => {
-    handleChat({ userId: "fake-1", displayName: "mossbyte", text: "!wave" });
-  }, 6_000);
+  const cycleMs = 30_000;
+  const scheduleBurst = () => {
+    const messages: Array<{ delay: number; userId: string; displayName: string; text: string }> = [
+      { delay: 300, userId: "fake-1", displayName: "mossbyte", text: "!sit" },
+      { delay: 900, userId: "fake-2", displayName: "lumen", text: "!sit" },
+      { delay: 1_500, userId: "fake-1", displayName: "mossbyte", text: "The room feels warm." },
+      { delay: 2_100, userId: "fake-3", displayName: "orbitcat", text: "!sit" },
+      { delay: 3_100, userId: "fake-2", displayName: "lumen", text: "A good chair." },
+      { delay: 4_400, userId: "fake-1", displayName: "mossbyte", text: "!wave" },
+      { delay: 6_200, userId: "fake-3", displayName: "orbitcat", text: "Quiet for a bit." },
+    ];
+    for (const message of messages) setTimeout(() => handleChat(message), message.delay);
+    setTimeout(scheduleBurst, cycleMs);
+  };
+  scheduleBurst();
 }
+
+const activityTimer = setInterval(() => {
+  const now = Date.now();
+  const transition = idle.update(now);
+  if (transition === "enter") {
+    console.log(`[idle] No human chat for ${idleMinutes} minute(s); residents are active.`);
+    residents.enterIdle(now);
+  }
+  const changed = residents.update(now, room.snapshot(now));
+  if (transition || changed) broadcastState(now);
+}, 100);
 
 server.listen(port, () => {
   console.log(`[server] Overlay: http://localhost:${port}/overlay.html`);
@@ -145,6 +200,7 @@ server.listen(port, () => {
 });
 
 function shutdown(): void {
+  clearInterval(activityTimer);
   twitchClient?.stop();
   overlaySockets.close();
   server.close(() => process.exit(0));

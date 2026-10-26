@@ -34,4 +34,23 @@ Set `FAKE_CHAT=1` in `.env`, or launch it for one PowerShell session:
 $env:FAKE_CHAT='1'; npm start
 ```
 
-Fake chat seats three sample viewers, exercises `!wave` and `!leave`, and never contacts Twitch.
+Fake chat seats three sample viewers, exercises `!wave` and normal-message bubbles, pauses for idle mode, and never contacts Twitch.
+
+## Idle mode
+
+After `IDLE_MINUTES` without any human chat message, two or three resident characters enter the room. They walk between spots, stretch, use empty chairs without displacing viewers, and trade short cozy lines. The fireplace and cat also become more active. Any human message ends idle mode immediately; resident speech stops and the residents step back within about two seconds.
+
+Set resident names with a comma-separated list of two or three names:
+
+```env
+IDLE_MINUTES=3
+RESIDENTS=Mori,Pip,Tabby
+```
+
+For a quick idle-mode demo, use a 15-second threshold with fake chat. Fake chat sends a short burst, stays silent long enough for idle mode to appear, then repeats:
+
+```powershell
+$env:FAKE_CHAT='1'; $env:IDLE_MINUTES='0.25'; npm start
+```
+
+Open `http://localhost:3000/api/state` to inspect the current room, idle flag, timestamps, and resident activity.

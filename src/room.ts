@@ -8,6 +8,10 @@ export interface ChatUser {
 export interface SeatedViewer extends ChatUser {
   chairIndex: number;
   waveUntil?: number;
+  bubble?: {
+    text: string;
+    expiresAt: number;
+  };
 }
 
 export interface RoomSnapshot {
@@ -32,6 +36,20 @@ export function parseCommand(message: string): RoomCommand | null {
   return null;
 }
 
+export function formatChatBubble(message: string, maximumLength = 40): string {
+  const characters = Array.from(message.trim());
+  const truncated =
+    characters.length > maximumLength
+      ? `${characters.slice(0, Math.max(0, maximumLength - 1)).join("")}…`
+      : characters.join("");
+  return truncated
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export class Room {
   private readonly seats: Array<SeatedViewer | null>;
 
@@ -42,12 +60,25 @@ export class Room {
     this.seats = Array.from({ length: chairCount }, () => null);
   }
 
-  snapshot(): RoomSnapshot {
+  snapshot(now = Date.now()): RoomSnapshot {
+    for (const viewer of this.seats) {
+      if (viewer?.bubble && viewer.bubble.expiresAt <= now) delete viewer.bubble;
+    }
     return {
       type: "state",
       chairs: this.chairCount,
       seats: this.seats.map((viewer) => (viewer ? { ...viewer } : null)),
     };
+  }
+
+  showChatBubble(userId: string, message: string, now = Date.now()): boolean {
+    const viewer = this.seats.find((seat) => seat?.id === userId);
+    if (!viewer) return false;
+    viewer.bubble = {
+      text: formatChatBubble(message),
+      expiresAt: now + 4_000,
+    };
+    return true;
   }
 
   apply(user: ChatUser, command: RoomCommand, now = Date.now()): RoomEvent | null {

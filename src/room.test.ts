@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseCommand, Room } from "./room.js";
+import { formatChatBubble, parseCommand, Room } from "./room.js";
 
 test("parses supported commands case-insensitively", () => {
   assert.equal(parseCommand(" !SIT "), "sit");
@@ -28,4 +28,23 @@ test("does not duplicate a viewer or overfill the room", () => {
   assert.equal(room.apply(first, "sit")?.event, "sit");
   assert.equal(room.apply(first, "sit"), null);
   assert.equal(room.apply(second, "sit"), null);
+});
+
+test("shows an escaped, truncated chat bubble for a seated viewer", () => {
+  const room = new Room(1);
+  room.apply({ id: "1", displayName: "viewer" }, "sit", 0);
+
+  assert.equal(room.showChatBubble("1", `<b>${"x".repeat(50)}&`, 1_000), true);
+  const bubble = room.snapshot(1_001).seats[0]?.bubble;
+  assert.ok(bubble);
+  assert.ok(!bubble.text.includes("<"));
+  assert.ok(bubble.text.startsWith("&lt;b&gt;"));
+  assert.equal(bubble.expiresAt, 5_000);
+  assert.equal(room.snapshot(5_000).seats[0]?.bubble, undefined);
+});
+
+test("formats chat by Unicode characters before escaping", () => {
+  const formatted = formatChatBubble("🙂".repeat(45));
+  assert.equal(Array.from(formatted).length, 40);
+  assert.ok(formatted.endsWith("…"));
 });

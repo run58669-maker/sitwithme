@@ -39,18 +39,46 @@
           leaf: "#456348",
           rug: "#b95563",
           rugLight: "#e88972",
+          residentOne: "#728b7d",
+          residentTwo: "#88728b",
+          residentThree: "#9a806a",
+          smoke: "#766171",
         };
-        let roomState = { chairs: 6, seats: Array(6).fill(null) };
+        let roomState = {
+          chairs: 6,
+          seats: Array(6).fill(null),
+          idle: false,
+          residents: [],
+        };
         let reconnectAttempt = 0;
         let lastWavingCount = -1;
+        let lastRuntimeKey = "";
 
         function updateAccessibility() {
           const seatedCount = roomState.seats.filter(Boolean).length;
           canvas.dataset.seatedCount = String(seatedCount);
+          canvas.dataset.idle = String(Boolean(roomState.idle));
           canvas.setAttribute(
             "aria-label",
-            `A pixel room with ${roomState.chairs} chairs and ${seatedCount} seated viewers`,
+            `A pixel room with ${roomState.chairs} chairs, ${seatedCount} seated viewers, and idle mode ${roomState.idle ? "on" : "off"}`,
           );
+        }
+
+        function updateRuntimeMetadata(now) {
+          const activeResidents = roomState.residents.filter((resident) => resident.action !== "quiet").length;
+          const viewerBubbles = roomState.seats.filter(
+            (viewer) => viewer?.bubble && Number(viewer.bubble.expiresAt) > now,
+          ).length;
+          const residentBubbles = roomState.residents.filter(
+            (resident) => resident.bubble && Number(resident.bubble.expiresAt) > now,
+          ).length;
+          const key = `${activeResidents}:${viewerBubbles}:${residentBubbles}:${roomState.idle}`;
+          if (key === lastRuntimeKey) return;
+          lastRuntimeKey = key;
+          canvas.dataset.activeResidents = String(activeResidents);
+          canvas.dataset.viewerBubbles = String(viewerBubbles);
+          canvas.dataset.residentBubbles = String(residentBubbles);
+          canvas.dataset.idle = String(Boolean(roomState.idle));
         }
 
         function resize() {
@@ -87,7 +115,46 @@
           return positions;
         }
 
-        function drawRoom() {
+        function drawFireplace(now) {
+          rect(690, 221, 83, 75, palette.outline);
+          rect(699, 229, 65, 67, palette.woodDark);
+          rect(707, 248, 49, 48, palette.outlineSoft);
+          rect(713, 257, 37, 39, "#3d2537");
+          rect(684, 213, 95, 12, palette.outline);
+          rect(691, 216, 81, 7, palette.wood);
+          const flicker = Math.floor(now / (roomState.idle ? 120 : 220)) % 3;
+          rect(725, 276 - flicker * 2, 13, 19 + flicker * 2, "#e66b3e");
+          rect(730, 269 + flicker, 9, 24 - flicker, palette.honey);
+          rect(735, 280 - flicker * 3, 8, 15 + flicker * 2, palette.cream);
+          if (roomState.idle && flicker === 1) rect(747, 269, 5, 8, "#e66b3e");
+        }
+
+        function drawCat(now) {
+          const cycle = now % 14000;
+          const stretching = roomState.idle && cycle < 2500;
+          const x = 157;
+          const y = 307;
+          const fur = "#6d5960";
+          if (stretching) {
+            rect(x, y + 8, 43, 11, palette.outline);
+            rect(x + 4, y + 9, 34, 8, fur);
+            rect(x + 35, y + 4, 13, 13, palette.outline);
+            rect(x + 38, y + 7, 8, 8, fur);
+            rect(x + 38, y + 1, 4, 7, fur);
+            rect(x + 44, y + 2, 4, 6, fur);
+            rect(x - 8, y + 15, 15, 4, palette.outline);
+          } else {
+            rect(x + 7, y + 5, 26, 18, palette.outline);
+            rect(x + 10, y + 8, 20, 13, fur);
+            rect(x + 27, y, 14, 16, palette.outline);
+            rect(x + 30, y + 4, 8, 9, fur);
+            rect(x + 29, y - 4, 4, 7, fur);
+            rect(x + 36, y - 3, 4, 7, fur);
+            rect(x, y + 17, 12, 5, palette.outline);
+          }
+        }
+
+        function drawRoom(now) {
           rect(94, 123, 772, 278, palette.outline);
           rect(102, 131, 756, 262, palette.wall);
           rect(102, 131, 756, 172, palette.wallLight);
@@ -120,6 +187,9 @@
           rect(765, 149, 16, 23, palette.leaf);
           rect(786, 161, 9, 11, palette.leaf);
 
+          drawFireplace(now);
+          drawCat(now);
+
           rect(287, 331, 386, 48, palette.outlineSoft);
           rect(297, 337, 366, 36, palette.rug);
           rect(319, 344, 322, 22, palette.rugLight);
@@ -147,6 +217,54 @@
           }
           const hue = Math.abs(hash) % 360;
           return `hsl(${hue} 48% 55%)`;
+        }
+
+        function decodeHtml(text) {
+          return text
+            .replaceAll("&lt;", "<")
+            .replaceAll("&gt;", ">")
+            .replaceAll("&quot;", '"')
+            .replaceAll("&#39;", "'")
+            .replaceAll("&amp;", "&");
+        }
+
+        function bubbleLines(text, maximumWidth) {
+          const lines = [];
+          let current = "";
+          for (const character of Array.from(text)) {
+            const candidate = `${current}${character}`;
+            if (context.measureText(candidate).width <= maximumWidth || current.length === 0) {
+              current = candidate;
+            } else {
+              lines.push(current.trimEnd());
+              current = character === " " ? "" : character;
+            }
+          }
+          if (current) lines.push(current);
+          if (lines.length === 0) lines.push("…");
+          if (lines.length > 2) {
+            lines[1] = `${lines.slice(1).join("").slice(0, 18)}…`;
+            lines.length = 2;
+          }
+          return lines;
+        }
+
+        function drawBubble(text, x, bottomY) {
+          context.font = "bold 12px monospace";
+          context.textAlign = "left";
+          context.textBaseline = "top";
+          const lines = bubbleLines(text, 150);
+          const textWidth = Math.max(...lines.map((lineText) => context.measureText(lineText).width), 30);
+          const width = Math.min(166, Math.max(58, textWidth + 16));
+          const height = 12 + lines.length * 15;
+          const left = Math.max(8, Math.min(WIDTH - width - 8, x - width / 2));
+          const top = bottomY - height - 8;
+          rect(left, top, width, height, palette.outline);
+          rect(left + 4, top + 4, width - 8, height - 8, palette.cream);
+          rect(x - 5, bottomY - 9, 10, 8, palette.outline);
+          rect(x - 3, bottomY - 9, 6, 5, palette.cream);
+          context.fillStyle = palette.outline;
+          lines.forEach((lineText, index) => context.fillText(lineText, left + 8, top + 7 + index * 15));
         }
 
         function drawPerson(viewer, x, y, now) {
@@ -191,10 +309,65 @@
           }
           pixel(5, 14, 3, 2, palette.plum);
           pixel(9, 14, 3, 2, palette.plum);
+          if (viewer.bubble && Number(viewer.bubble.expiresAt) > now) {
+            drawBubble(decodeHtml(viewer.bubble.text), x, originY - 28);
+          }
+        }
+
+        function drawResident(resident, positions, now) {
+          if (resident.action === "quiet") return;
+          const seatedPosition = resident.chairIndex === null ? null : positions[resident.chairIndex];
+          const x = seatedPosition?.x ?? resident.x;
+          const y = seatedPosition?.y ?? resident.y;
+          const scale = 3;
+          const walkingBob = resident.action === "walking" ? Math.floor(now / 180) % 2 : 0;
+          const originX = Math.round(x - 8 * scale);
+          const originY = Math.round(y - 42 - walkingBob);
+          const colors = [palette.residentOne, palette.residentTwo, palette.residentThree];
+          const color = colors[resident.paletteIndex % colors.length];
+          const skin = "#d8a487";
+          const hair = palette.smoke;
+          const stretching = resident.action === "stretching";
+
+          context.font = "bold 13px monospace";
+          context.textAlign = "center";
+          context.textBaseline = "bottom";
+          context.lineWidth = 5;
+          context.strokeStyle = palette.outline;
+          context.strokeText(resident.name, x, originY - 7);
+          context.fillStyle = "#ddd3bd";
+          context.fillText(resident.name, x, originY - 7);
+
+          const pixel = (px, py, width, height, fill) => {
+            rect(originX + px * scale, originY + py * scale, width * scale, height * scale, fill);
+          };
+          pixel(4, 1, 8, 2, hair);
+          pixel(3, 3, 10, 4, hair);
+          pixel(4, 4, 8, 5, skin);
+          pixel(5, 4, 2, 2, hair);
+          pixel(9, 4, 2, 2, hair);
+          pixel(6, 6, 1, 1, palette.outline);
+          pixel(9, 6, 1, 1, palette.outline);
+          pixel(5, 9, 6, 5, color);
+          if (stretching) {
+            pixel(1, 7, 4, 2, color);
+            pixel(11, 7, 4, 2, color);
+            pixel(0, 6, 2, 2, skin);
+            pixel(14, 6, 2, 2, skin);
+          } else {
+            pixel(3, 10, 2, 4, color);
+            pixel(11, 10, 2, 4, color);
+          }
+          pixel(5, 14, 3, 2, palette.woodDark);
+          pixel(9, 14, 3, 2, palette.woodDark);
+          if (resident.bubble && Number(resident.bubble.expiresAt) > now) {
+            drawBubble(resident.bubble.text, x, originY - 25);
+          }
         }
 
         function render(now) {
           const wallClock = Date.now();
+          updateRuntimeMetadata(wallClock);
           const wavingCount = roomState.seats.filter(
             (viewer) => viewer && Number(viewer.waveUntil || 0) > wallClock,
           ).length;
@@ -208,10 +381,11 @@
           context.setTransform(1, 0, 0, 1, 0, 0);
           context.clearRect(0, 0, canvas.width, canvas.height);
           context.setTransform(ratio, 0, 0, ratio, offsetX, offsetY);
-          drawRoom();
+          drawRoom(wallClock);
           const positions = chairPositions(roomState.chairs);
+          positions.forEach((position) => drawChair(position.x, position.y));
+          roomState.residents.forEach((resident) => drawResident(resident, positions, wallClock));
           positions.forEach((position, index) => {
-            drawChair(position.x, position.y);
             const viewer = roomState.seats[index];
             if (viewer) drawPerson(viewer, position.x, position.y, wallClock);
           });
@@ -225,8 +399,18 @@
           socket.addEventListener("message", (event) => {
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
-            if (message.type === "state" && Number.isInteger(message.chairs) && Array.isArray(message.seats)) {
-              roomState = { chairs: message.chairs, seats: message.seats };
+            if (
+              message.type === "state" &&
+              Number.isInteger(message.chairs) &&
+              Array.isArray(message.seats) &&
+              Array.isArray(message.residents)
+            ) {
+              roomState = {
+                chairs: message.chairs,
+                seats: message.seats,
+                idle: Boolean(message.idle),
+                residents: message.residents,
+              };
               updateAccessibility();
             }
             if (message.type === "event" && message.event === "wave") {
