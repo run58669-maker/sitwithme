@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Sit With Me Overlay</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+      canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <canvas id="room" aria-label="A pixel room with chairs for Twitch viewers"></canvas>
+    <script>
+      (() => {
+        "use strict";
+
+        const canvas = document.getElementById("room");
+        const context = canvas.getContext("2d");
+        const WIDTH = 960;
+        const HEIGHT = 540;
+        const palette = {
+          outline: "#291a35",
+          outlineSoft: "#4a2944",
+          wall: "#bd765f",
+          wallLight: "#e5ad79",
+          wood: "#9f553a",
+          woodLight: "#d98247",
+          woodDark: "#603142",
+          honey: "#f2ad59",
+          cream: "#fff1c9",
+          plum: "#5c3462",
+          dusk: "#4a3a73",
+          duskLight: "#b55d78",
+          teal: "#3f7c72",
+          leaf: "#456348",
+          rug: "#b95563",
+          rugLight: "#e88972",
+        };
+        let roomState = { chairs: 6, seats: Array(6).fill(null) };
+        let reconnectAttempt = 0;
+        let lastWavingCount = -1;
+
+        function updateAccessibility() {
+          const seatedCount = roomState.seats.filter(Boolean).length;
+          canvas.dataset.seatedCount = String(seatedCount);
+          canvas.setAttribute(
+            "aria-label",
+            `A pixel room with ${roomState.chairs} chairs and ${seatedCount} seated viewers`,
+          );
+        }
+
+        function resize() {
+          const ratio = Math.min(window.devicePixelRatio || 1, 2);
+          canvas.width = Math.round(window.innerWidth * ratio);
+          canvas.height = Math.round(window.innerHeight * ratio);
+          context.imageSmoothingEnabled = false;
+        }
+
+        function rect(x, y, width, height, color) {
+          context.fillStyle = color;
+          context.fillRect(Math.round(x), Math.round(y), Math.round(width), Math.round(height));
+        }
+
+        function line(x1, y1, x2, y2, color, width = 2) {
+          context.strokeStyle = color;
+          context.lineWidth = width;
+          context.beginPath();
+          context.moveTo(Math.round(x1), Math.round(y1));
+          context.lineTo(Math.round(x2), Math.round(y2));
+          context.stroke();
+        }
+
+        function chairPositions(count) {
+          const positions = [];
+          const columns = Math.min(count, 8);
+          const startX = WIDTH / 2 - ((columns - 1) * 92) / 2;
+          for (let index = 0; index < count; index += 1) {
+            const row = Math.floor(index / 8);
+            const rowCount = Math.min(8, count - row * 8);
+            const rowStart = WIDTH / 2 - ((rowCount - 1) * 92) / 2;
+            positions.push({ x: rowStart + (index % 8) * 92, y: 372 + row * 68 });
+          }
+          return positions;
+        }
+
+        function drawRoom() {
+          rect(94, 123, 772, 278, palette.outline);
+          rect(102, 131, 756, 262, palette.wall);
+          rect(102, 131, 756, 172, palette.wallLight);
+          rect(102, 296, 756, 97, palette.woodLight);
+
+          for (let y = 312; y < 393; y += 19) line(102, y, 858, y, palette.wood, 3);
+          for (let x = 118; x < 858; x += 63) line(x, 296, x - 15, 393, palette.wood, 2);
+          rect(77, 393, 806, 22, palette.outline);
+          rect(88, 393, 784, 13, palette.wood);
+          rect(107, 406, 746, 10, palette.woodDark);
+
+          rect(379, 151, 202, 105, palette.outline);
+          rect(386, 158, 188, 91, palette.dusk);
+          rect(389, 207, 182, 39, palette.duskLight);
+          rect(477, 158, 7, 91, palette.outlineSoft);
+          rect(386, 201, 188, 7, palette.outlineSoft);
+          for (const [x, y] of [[408, 177], [438, 190], [528, 175], [548, 195]]) rect(x, y, 4, 4, palette.cream);
+          rect(420, 224, 24, 22, palette.plum);
+          rect(523, 218, 31, 28, palette.plum);
+
+          rect(151, 179, 111, 8, palette.outlineSoft);
+          rect(159, 160, 12, 19, palette.plum);
+          rect(176, 154, 11, 25, palette.teal);
+          rect(192, 158, 14, 21, palette.wood);
+          rect(217, 160, 29, 19, palette.leaf);
+          rect(225, 149, 10, 17, palette.leaf);
+
+          rect(737, 172, 62, 7, palette.outlineSoft);
+          rect(750, 158, 10, 14, palette.leaf);
+          rect(765, 149, 16, 23, palette.leaf);
+          rect(786, 161, 9, 11, palette.leaf);
+
+          rect(287, 331, 386, 48, palette.outlineSoft);
+          rect(297, 337, 366, 36, palette.rug);
+          rect(319, 344, 322, 22, palette.rugLight);
+          for (let x = 337; x < 635; x += 40) rect(x, 352, 14, 6, palette.cream);
+        }
+
+        function drawChair(x, y) {
+          rect(x - 29, y - 45, 58, 58, palette.outline);
+          rect(x - 23, y - 39, 46, 36, palette.wood);
+          rect(x - 19, y - 34, 38, 8, palette.woodLight);
+          rect(x - 19, y - 19, 38, 6, palette.woodLight);
+          rect(x - 26, y - 2, 52, 17, palette.outline);
+          rect(x - 20, y + 3, 40, 10, palette.rugLight);
+          rect(x - 24, y + 13, 8, 24, palette.outline);
+          rect(x + 16, y + 13, 8, 24, palette.outline);
+          rect(x - 20, y + 13, 6, 20, palette.wood);
+          rect(x + 14, y + 13, 6, 20, palette.wood);
+        }
+
+        function hashColor(name) {
+          let hash = 2166136261;
+          for (let index = 0; index < name.length; index += 1) {
+            hash ^= name.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+          }
+          const hue = Math.abs(hash) % 360;
+          return `hsl(${hue} 48% 55%)`;
+        }
+
+        function drawPerson(viewer, x, y, now) {
+          const scale = 3;
+          const originX = Math.round(x - 8 * scale);
+          const originY = Math.round(y - 42);
+          const color = hashColor(viewer.displayName);
+          const skin = "#f1b58d";
+          const hair = palette.outlineSoft;
+          const waving = Number(viewer.waveUntil || 0) > now;
+          const wavePhase = Math.floor(now / 140) % 2;
+
+          context.font = "bold 15px monospace";
+          context.textAlign = "center";
+          context.textBaseline = "bottom";
+          context.lineWidth = 5;
+          context.strokeStyle = palette.outline;
+          context.strokeText(viewer.displayName, x, originY - 8);
+          context.fillStyle = palette.cream;
+          context.fillText(viewer.displayName, x, originY - 8);
+
+          const pixel = (px, py, width, height, fill) => {
+            rect(originX + px * scale, originY + py * scale, width * scale, height * scale, fill);
+          };
+
+          pixel(5, 0, 6, 2, hair);
+          pixel(3, 2, 10, 5, hair);
+          pixel(4, 4, 8, 5, skin);
+          pixel(4, 3, 2, 3, hair);
+          pixel(10, 3, 2, 3, hair);
+          pixel(6, 6, 1, 1, palette.outline);
+          pixel(9, 6, 1, 1, palette.outline);
+          pixel(5, 9, 6, 5, color);
+          pixel(3, 10, 2, 4, color);
+          if (waving) {
+            const handY = wavePhase ? 5 : 3;
+            pixel(11, 9, 2, 2, color);
+            pixel(13, handY, 2, 6, skin);
+            pixel(14, handY - 1, 1, 2, skin);
+          } else {
+            pixel(11, 10, 2, 4, color);
+          }
+          pixel(5, 14, 3, 2, palette.plum);
+          pixel(9, 14, 3, 2, palette.plum);
+        }
+
+        function render(now) {
+          const wallClock = Date.now();
+          const wavingCount = roomState.seats.filter(
+            (viewer) => viewer && Number(viewer.waveUntil || 0) > wallClock,
+          ).length;
+          if (wavingCount !== lastWavingCount) {
+            canvas.dataset.wavingCount = String(wavingCount);
+            lastWavingCount = wavingCount;
+          }
+          const ratio = Math.min(canvas.width / WIDTH, canvas.height / HEIGHT);
+          const offsetX = (canvas.width - WIDTH * ratio) / 2;
+          const offsetY = (canvas.height - HEIGHT * ratio) / 2;
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.setTransform(ratio, 0, 0, ratio, offsetX, offsetY);
+          drawRoom();
+          const positions = chairPositions(roomState.chairs);
+          positions.forEach((position, index) => {
+            drawChair(position.x, position.y);
+            const viewer = roomState.seats[index];
+            if (viewer) drawPerson(viewer, position.x, position.y, wallClock);
+          });
+          requestAnimationFrame(render);
+        }
+
+        function connect() {
+          const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+          const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+          socket.addEventListener("open", () => { reconnectAttempt = 0; });
+          socket.addEventListener("message", (event) => {
+            let message;
+            try { message = JSON.parse(event.data); } catch { return; }
+            if (message.type === "state" && Number.isInteger(message.chairs) && Array.isArray(message.seats)) {
+              roomState = { chairs: message.chairs, seats: message.seats };
+              updateAccessibility();
+            }
+            if (message.type === "event" && message.event === "wave") {
+              const viewer = roomState.seats[message.chairIndex];
+              if (viewer) viewer.waveUntil = message.waveUntil || Date.now() + 1500;
+            }
+          });
+          socket.addEventListener("close", () => {
+            const delay = Math.min(1000 * 2 ** reconnectAttempt, 10000);
+            reconnectAttempt += 1;
+            window.setTimeout(connect, delay);
+          });
+        }
+
+        window.addEventListener("resize", resize);
+        resize();
+        updateAccessibility();
+        connect();
+        requestAnimationFrame(render);
+      })();
+    </script>
+  </body>
+</html>
