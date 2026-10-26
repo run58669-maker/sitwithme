@@ -1,4 +1,4 @@
-# sitwithme — Devpost draft
+# Devpost submission text
 
 ## Inspiration
 
@@ -21,17 +21,3 @@ The hardest part was making several timing systems feel like one calm room. Chat
 ## What's next
 
 Next we would add more room layouts, accessible font-size controls, optional channel-themed props, and a lightweight import/export flow for settings. We would also like to support more EventSub-driven moments, such as welcoming a first-time chatter or celebrating a returning viewer, while keeping the room deliberately calm rather than turning it into a noisy alert system.
-
-## Three-minute demo video shot list
-
-| Scene | Seconds | What's on screen |
-| --- | ---: | --- |
-| The quiet-stream problem | 0–15 | Stream layout with the empty transparent pixel room; title card explains that silence can feel awkward. |
-| Meet sitwithme | 15–35 | Overlay at 1280×720; quick close-ups of the room, empty chairs, fireplace, and cat. |
-| Viewer commands | 35–65 | Fake viewers send `!sit`; characters appear with display names. One sends `!wave`, then a normal message appears in a speech bubble. |
-| Streamer panel | 65–100 | Open `/panel`; change chairs from 6 to 8, switch to Night blue, rename residents, save, and show the overlay updating live. |
-| Idle mode | 100–135 | Click **Test idle now**; residents walk in, use empty chairs, stretch, and exchange a two-line conversation. Show the cat stretch and fireplace flicker. |
-| Chat returns | 135–152 | Send a fake `!sit`; idle ends immediately and residents step back while the viewer keeps the chair. |
-| OBS setup | 152–168 | Show Browser Source URL, 1280×720 size, transparent background, and briefly demonstrate `?scale=1.5`. |
-| Under the hood | 168–177 | Fast code montage: EventSub WebSocket, TypeScript state machine, Canvas renderer, and tests. |
-| Closing | 177–180 | Final cozy room with project name and one-line message: “Make quiet feel shared.” |
