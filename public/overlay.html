@@ -73,6 +73,7 @@
         let reconnectAttempt = 0;
         let lastWavingCount = -1;
         let lastRuntimeKey = "";
+        let hasReceivedState = false;
 
         function updateAccessibility() {
           const seatedCount = roomState.seats.filter(Boolean).length;
@@ -152,8 +153,8 @@
         function drawCat(now) {
           const cycle = now % 14000;
           const stretching = roomState.idle && cycle < 2500;
-          const x = 157;
-          const y = 307;
+          const x = 802;
+          const y = 266;
           const fur = palette.cat;
           if (stretching) {
             rect(x, y + 8, 43, 11, palette.outline);
@@ -287,6 +288,28 @@
           lines.forEach((lineText, index) => context.fillText(lineText, left + 8, top + 7 + index * 15));
         }
 
+        function ellipsizeLabel(text, maximumWidth) {
+          if (context.measureText(text).width <= maximumWidth) return text;
+          const characters = Array.from(text);
+          const ellipsis = "…";
+          while (characters.length > 0 && context.measureText(`${characters.join("")}${ellipsis}`).width > maximumWidth) {
+            characters.pop();
+          }
+          return `${characters.join("")}${ellipsis}`;
+        }
+
+        function drawNameLabel(name, x, bottomY, color) {
+          context.font = "bold 12px monospace";
+          context.textAlign = "center";
+          context.textBaseline = "bottom";
+          context.lineWidth = 4;
+          const label = ellipsizeLabel(name, 86);
+          context.strokeStyle = palette.outline;
+          context.strokeText(label, x, bottomY);
+          context.fillStyle = color;
+          context.fillText(label, x, bottomY);
+        }
+
         function drawPerson(viewer, x, y, now) {
           const scale = 3;
           const originX = Math.round(x - 8 * scale);
@@ -296,15 +319,6 @@
           const hair = palette.outlineSoft;
           const waving = Number(viewer.waveUntil || 0) > now;
           const wavePhase = Math.floor(now / 140) % 2;
-
-          context.font = "bold 15px monospace";
-          context.textAlign = "center";
-          context.textBaseline = "bottom";
-          context.lineWidth = 5;
-          context.strokeStyle = palette.outline;
-          context.strokeText(viewer.displayName, x, originY - 8);
-          context.fillStyle = palette.cream;
-          context.fillText(viewer.displayName, x, originY - 8);
 
           const pixel = (px, py, width, height, fill) => {
             rect(originX + px * scale, originY + py * scale, width * scale, height * scale, fill);
@@ -348,15 +362,6 @@
           const skin = palette.residentSkin;
           const hair = palette.smoke;
           const stretching = resident.action === "stretching";
-
-          context.font = "bold 13px monospace";
-          context.textAlign = "center";
-          context.textBaseline = "bottom";
-          context.lineWidth = 5;
-          context.strokeStyle = palette.outline;
-          context.strokeText(resident.name, x, originY - 7);
-          context.fillStyle = palette.residentLabel;
-          context.fillText(resident.name, x, originY - 7);
 
           const pixel = (px, py, width, height, fill) => {
             rect(originX + px * scale, originY + py * scale, width * scale, height * scale, fill);
@@ -409,7 +414,60 @@
             const viewer = roomState.seats[index];
             if (viewer) drawPerson(viewer, position.x, position.y, wallClock);
           });
+          roomState.residents.forEach((resident) => {
+            if (resident.action === "quiet") return;
+            const seatedPosition = resident.chairIndex === null ? null : positions[resident.chairIndex];
+            const x = seatedPosition?.x ?? resident.x;
+            const y = seatedPosition?.y ?? resident.y;
+            const walkingBob = resident.action === "walking" ? Math.floor(wallClock / 180) % 2 : 0;
+            drawNameLabel(resident.name, x, Math.round(y - 49 - walkingBob), palette.residentLabel);
+          });
+          positions.forEach((position, index) => {
+            const viewer = roomState.seats[index];
+            if (viewer) drawNameLabel(viewer.displayName, position.x, position.y - 50, palette.cream);
+          });
           requestAnimationFrame(render);
+        }
+
+        function applyState(message) {
+          if (
+            !message ||
+            !Number.isInteger(message.chairs) ||
+            !Array.isArray(message.seats) ||
+            !Array.isArray(message.residents)
+          ) {
+            return false;
+          }
+          roomState = {
+            chairs: message.chairs,
+            seats: message.seats,
+            idle: Boolean(message.idle),
+            residents: message.residents,
+            palette: PALETTES[message.palette] ? message.palette : "cozy-orange",
+          };
+          palette = PALETTES[roomState.palette];
+          canvas.dataset.palette = roomState.palette;
+          hasReceivedState = true;
+          updateAccessibility();
+          return true;
+        }
+
+        async function loadInitialState() {
+          try {
+            const response = await fetch("/api/state", { cache: "no-store" });
+            if (!response.ok) return;
+            const message = await response.json();
+            if (hasReceivedState) return;
+            applyState({
+              chairs: message.room?.chairs,
+              seats: message.room?.seats,
+              idle: message.idle,
+              residents: message.residents,
+              palette: message.palette,
+            });
+          } catch {
+            // The WebSocket connection remains the primary live-state path.
+          }
         }
 
         function connect() {
@@ -419,23 +477,7 @@
           socket.addEventListener("message", (event) => {
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
-            if (
-              message.type === "state" &&
-              Number.isInteger(message.chairs) &&
-              Array.isArray(message.seats) &&
-              Array.isArray(message.residents)
-            ) {
-              roomState = {
-                chairs: message.chairs,
-                seats: message.seats,
-                idle: Boolean(message.idle),
-                residents: message.residents,
-                palette: PALETTES[message.palette] ? message.palette : "cozy-orange",
-              };
-              palette = PALETTES[roomState.palette];
-              canvas.dataset.palette = roomState.palette;
-              updateAccessibility();
-            }
+            if (message.type === "state") applyState(message);
             if (message.type === "event" && message.event === "wave") {
               const viewer = roomState.seats[message.chairIndex];
               if (viewer) viewer.waveUntil = message.waveUntil || Date.now() + 1500;
@@ -452,6 +494,7 @@
         resize();
         canvas.dataset.scale = String(overlayScale);
         updateAccessibility();
+        void loadInitialState();
         connect();
         requestAnimationFrame(render);
       })();
