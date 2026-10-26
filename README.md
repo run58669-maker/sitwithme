@@ -130,4 +130,4 @@ Codex thread: 01a175f8-0883-7641-b5d9-6e3974e7582a
 
 ## Demo video
 
-https://youtu.be/EE4D3sKncFs (2:27)
+https://youtu.be/1LjeokfOMXg (2:20)
