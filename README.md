@@ -96,7 +96,7 @@ The Compose setup binds port 3000 and stores `settings.json` plus the OAuth toke
 
 Built with OpenAI Codex for the Codex x TwitchCon Hackathon 2026.
 
-Codex thread: TBD
+Codex thread: 01a175f8-0883-7641-b5d9-6e3974e7582a
 
 ## License
 
